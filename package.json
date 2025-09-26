@@ -4,15 +4,18 @@
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web"
   },
   "dependencies": {
+    "@react-navigation/native": "^7.1.17",
+    "@react-navigation/stack": "^7.4.8",
     "expo": "~54.0.10",
     "expo-status-bar": "~3.0.8",
     "react": "19.1.0",
-    "react-native": "0.81.4"
+    "react-native": "0.81.4",
+    "react-native-bluetooth-classic": "^1.73.0-rc.14"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
