@@ -81,27 +81,20 @@ export class BluetoothServiceWrapperEssae extends BluetoothBaseServiceWrapper {
         BluetoothServiceWrapperEssae.STOP_FETCHING_WEIGHT_COMMAND,
         "\n",
         "\n",
-        {
-          callback: (message: string, responseType: BluetoothResponseType) => {
-            if (responseType === BluetoothResponseType.SUCCESS) {
-              this.readWeightFromMessageString(message, weightCallback);
-            } else {
-              weightCallback(0, responseType, responseType.toString());
-            }
+        (message: string, responseType: BluetoothResponseType) => {
+          if (responseType === BluetoothResponseType.SUCCESS) {
+            this.readWeightFromMessageString(message, weightCallback);
+          } else {
+            weightCallback(0, responseType, responseType.toString());
+          }
 
-            // Send stop command
-            this.sendMessageAndForget(
-              BluetoothServiceWrapperEssae.STOP_FETCHING_WEIGHT_COMMAND,
-              {
-                callback: (
-                  message: string,
-                  responseType: BluetoothResponseType
-                ) => {
-                  console.log("Stop weight result:", responseType);
-                },
-              }
-            );
-          },
+          // Send stop command
+          this.sendMessageAndForget(
+            BluetoothServiceWrapperEssae.STOP_FETCHING_WEIGHT_COMMAND,
+            (message: string, responseType: BluetoothResponseType) => {
+              console.log("Stop weight result:", responseType);
+            }
+          );
         },
         liveMessagesCallback
       );
@@ -155,16 +148,14 @@ export class BluetoothServiceWrapperNissan extends BluetoothBaseServiceWrapper {
         BluetoothServiceWrapperNissan.STOP_FETCHING_WEIGHT_COMMAND,
         "#",
         "*",
-        {
-          callback: (message: string, responseType: BluetoothResponseType) => {
-            if (responseType === BluetoothResponseType.SUCCESS) {
-              this.readWeightFromMessageString(message, weightCallback);
-            } else {
-              weightCallback(0, responseType, responseType.toString());
-            }
+        (message: string, responseType: BluetoothResponseType) => {
+          if (responseType === BluetoothResponseType.SUCCESS) {
+            this.readWeightFromMessageString(message, weightCallback);
+          } else {
+            weightCallback(0, responseType, responseType.toString());
+          }
 
-            this.sendStopWeightAndForget();
-          },
+          this.sendStopWeightAndForget();
         },
         liveMessagesCallback
       );
@@ -174,10 +165,8 @@ export class BluetoothServiceWrapperNissan extends BluetoothBaseServiceWrapper {
   private sendStopWeightAndForget(): void {
     this.sendMessageAndForget(
       BluetoothServiceWrapperNissan.STOP_FETCHING_WEIGHT_COMMAND,
-      {
-        callback: (message: string, responseType: BluetoothResponseType) => {
-          console.log("Stop weight result:", responseType);
-        },
+      (message: string, responseType: BluetoothResponseType) => {
+        console.log("Stop weight result:", responseType);
       }
     );
   }
