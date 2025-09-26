@@ -40,14 +40,20 @@ abstract class BluetoothBaseServiceWrapper {
     liveMessagesCallback: (message: string) => void
   ): void {
     if (message.trim()) {
-      this.bluetoothService.sendData(
-        message,
-        endMessage,
-        startPart,
-        endPart,
-        callback,
-        liveMessagesCallback
-      );
+      // First send the command
+      this.bluetoothService.sendDataAndForget(message, (msg, responseType) => {
+        if (responseType === "SUCCESS") {
+          // Then listen for response
+          this.bluetoothService.listenForData(
+            startPart,
+            endPart,
+            liveMessagesCallback,
+            callback
+          );
+        } else {
+          callback("", responseType);
+        }
+      });
     }
   }
 

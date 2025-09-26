@@ -41,16 +41,29 @@ class BluetoothService {
 
   private isConnected = false;
   private subscription?: BluetoothEventSubscription;
+  private connectionSubscription?: BluetoothEventSubscription;
 
   private connectedDevice?: BluetoothDevice;
 
   async connectToDevice(device: BluetoothDevice, callback: ConnectionCallback) {
     try {
-      const connected = await device.connect({ UUID: BluetoothService.UUID });
-      console.log("Connected:", connected);
-      if (connected) {
-        this.connectedDevice = device; // ✅ save it
+      if (!device?.id) throw new Error("Invalid device ID");
+      const enabled = await RNBluetoothClassic.isBluetoothEnabled();
+      if (!enabled) throw new Error("Bluetooth is disabled");
+
+      const connectedDevice = await RNBluetoothClassic.connectToDevice(
+        device.id
+      );
+
+      if (!connectedDevice) throw new Error("Failed to connect");
+
+      if (connectedDevice) {
+        this.connectedDevice = connectedDevice; // store full device object
         this.isConnected = true;
+
+        // Set up connection monitoring
+        this.setupConnectionMonitoring();
+
         callback(true);
       } else {
         callback(false, "Connection failed");
@@ -58,6 +71,7 @@ class BluetoothService {
     } catch (error: any) {
       this.isConnected = false;
       callback(false, error?.message ?? "Connection error");
+      console.log("Connection error:", error);
     }
   }
 
@@ -66,6 +80,17 @@ class BluetoothService {
       if (this.subscription) {
         this.subscription.remove();
         this.subscription = undefined;
+      }
+
+      if (this.connectionSubscription) {
+        this.connectionSubscription.remove();
+        this.connectionSubscription = undefined;
+      }
+
+      // Clear connection monitoring interval
+      if ((this as any).connectionInterval) {
+        clearInterval((this as any).connectionInterval);
+        (this as any).connectionInterval = undefined;
       }
 
       if (this.connectedDevice) {
@@ -113,34 +138,69 @@ class BluetoothService {
       callback("", BluetoothResponseType.TIME_OUT);
     }, BluetoothService.TIMEOUT_DURATION);
 
-    this.subscription = this.connectedDevice.onDataReceived(
-      (event: BluetoothEvent) => {
-        const data = event.data;
-        liveMessagesCallback(data);
-        buffer += data;
+    this.subscription = this.connectedDevice.onDataReceived((event: any) => {
+      const data = event.data || event;
+      liveMessagesCallback(data);
+      buffer += data;
 
-        if (buffer.includes(BluetoothService.ERROR_STRING)) {
+      if (buffer.includes(BluetoothService.ERROR_STRING)) {
+        clearTimeout(timeout);
+        this.subscription?.remove();
+        callback("", BluetoothResponseType.ERROR);
+      }
+
+      if (buffer.includes(startBytes) && buffer.includes(endBytes)) {
+        const startIndex = buffer.indexOf(startBytes);
+        const endIndex = buffer.indexOf(endBytes);
+        if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+          const finalData = buffer.substring(startIndex, endIndex);
           clearTimeout(timeout);
           this.subscription?.remove();
-          callback("", BluetoothResponseType.ERROR);
-        }
-
-        if (buffer.includes(startBytes) && buffer.includes(endBytes)) {
-          const startIndex = buffer.indexOf(startBytes);
-          const endIndex = buffer.indexOf(endBytes);
-          if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-            const finalData = buffer.substring(startIndex, endIndex);
-            clearTimeout(timeout);
-            this.subscription?.remove();
-            callback(finalData, BluetoothResponseType.SUCCESS);
-          }
+          callback(finalData, BluetoothResponseType.SUCCESS);
         }
       }
-    );
+    });
   }
 
   connected(): boolean {
     return this.isConnected;
+  }
+
+  breakListenLoop(): void {
+    if (this.subscription) {
+      this.subscription.remove();
+      this.subscription = undefined;
+    }
+  }
+
+  private setupConnectionMonitoring(): void {
+    // Monitor connection status periodically
+    const checkConnection = async () => {
+      if (this.connectedDevice && this.isConnected) {
+        try {
+          const isConnected = await this.connectedDevice.isConnected();
+          if (!isConnected) {
+            console.log("Device disconnected");
+            this.isConnected = false;
+            this.connectedDevice = undefined;
+            if (this.subscription) {
+              this.subscription.remove();
+              this.subscription = undefined;
+            }
+          }
+        } catch (error) {
+          console.log("Connection check failed:", error);
+          this.isConnected = false;
+          this.connectedDevice = undefined;
+        }
+      }
+    };
+
+    // Check connection every 5 seconds
+    const interval = setInterval(checkConnection, 5000);
+
+    // Store interval ID for cleanup
+    (this as any).connectionInterval = interval;
   }
 }
 

@@ -67,10 +67,11 @@ const WeighingScaleScreen = () => {
   };
 
   const connectToDevice = async (device: BluetoothDevice) => {
+    console.log("Connecting to device:", device);
     try {
       setIsLoading(true);
       await BluetoothService.connectToDevice(
-        device.id,
+        device,
         (isConnected, errorMessage) => {
           setIsConnected(isConnected);
           if (isConnected) {
@@ -126,6 +127,16 @@ const WeighingScaleScreen = () => {
           if (responseType === "SUCCESS") {
             setWeight(weight);
             Alert.alert("Weight Reading", `Weight: ${weight} grams`);
+          } else if (responseType === "TIME_OUT") {
+            Alert.alert(
+              "Timeout",
+              "Weight reading timed out. Please try again."
+            );
+          } else if (responseType === "NO_DATA") {
+            Alert.alert(
+              "No Data",
+              "No weight data received. Please ensure the scale is ready and try again."
+            );
           } else {
             Alert.alert("Error", errorMessage || "Failed to read weight");
           }
@@ -137,6 +148,7 @@ const WeighingScaleScreen = () => {
     } catch (error) {
       setIsLoading(false);
       setLiveMessage("");
+      console.error("Get weight error:", error);
       Alert.alert("Error", "Failed to read weight");
     }
   };
