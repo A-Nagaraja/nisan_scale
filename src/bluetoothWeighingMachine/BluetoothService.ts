@@ -36,7 +36,7 @@ export type ConnectionCallback = (
 
 class BluetoothService {
   private static readonly UUID = "00001101-0000-1000-8000-00805F9B34FB";
-  private static readonly TIMEOUT_DURATION = 5000; // 5 sec
+  private static readonly TIMEOUT_DURATION = 15000; // 15 sec
   private static readonly ERROR_STRING = "ERROR";
 
   private isConnected = false;
@@ -54,6 +54,9 @@ class BluetoothService {
       const connectedDevice = await RNBluetoothClassic.connectToDevice(
         device.id
       );
+
+      console.log("Connected device:", connectedDevice);
+      console.log("Connected device ID:", connectedDevice?.id);
 
       if (!connectedDevice) throw new Error("Failed to connect");
 
@@ -115,6 +118,7 @@ class BluetoothService {
     }
     try {
       await this.connectedDevice.write(data);
+      console.log("Data sent:", data);
       callback("", BluetoothResponseType.SUCCESS);
     } catch {
       callback("", BluetoothResponseType.ERROR);
@@ -131,34 +135,85 @@ class BluetoothService {
       callback("", BluetoothResponseType.ERROR);
       return;
     }
-
+    console.log("=== LISTENING FOR DATA ===");
     let buffer = "";
+    let hasReceivedData = false;
     const timeout = setTimeout(() => {
       this.subscription?.remove();
-      callback("", BluetoothResponseType.TIME_OUT);
+      console.log("Timeout reached");
+      if (hasReceivedData) {
+        console.log("Received data before timeout:", buffer, buffer.length);
+        // If we received some data but didn't get proper end marker,
+        // return what we have (this handles the continuous stream case)
+        callback(buffer, BluetoothResponseType.SUCCESS);
+      } else {
+        callback("", BluetoothResponseType.TIME_OUT);
+      }
     }, BluetoothService.TIMEOUT_DURATION);
 
     this.subscription = this.connectedDevice.onDataReceived((event: any) => {
+      console.log("=== EVENT RECEIVED ===");
       const data = event.data || event;
+      console.log("=== DATA RECEIVED ===");
+      console.log("Raw data:", data);
+      console.log("Data type:", typeof data);
+      console.log("Data length:", data.length);
+      console.log("Data as string:", JSON.stringify(data));
+      console.log("Looking for startBytes:", startBytes, "endBytes:", endBytes);
+
       liveMessagesCallback(data);
       buffer += data;
+      hasReceivedData = true;
+
+      console.log("Current buffer:", buffer);
+      console.log("Buffer length:", buffer.length);
+      console.log(
+        "Buffer as hex:",
+        Buffer.from(buffer, "utf8").toString("hex")
+      );
 
       if (buffer.includes(BluetoothService.ERROR_STRING)) {
+        console.log("Error detected in buffer");
         clearTimeout(timeout);
         this.subscription?.remove();
         callback("", BluetoothResponseType.ERROR);
+        return;
       }
 
-      if (buffer.includes(startBytes) && buffer.includes(endBytes)) {
-        const startIndex = buffer.indexOf(startBytes);
-        const endIndex = buffer.indexOf(endBytes);
-        if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-          const finalData = buffer.substring(startIndex, endIndex);
+      // For weighing machines, we often get continuous data streams
+      // Check if we have weight data (numbers with * or # separators)
+      const hasWeightData = /\d+[\*#]/.test(buffer);
+      console.log("Has weight data pattern:", hasWeightData);
+
+      // Also check for any numeric data
+      const hasAnyNumbers = /\d/.test(buffer);
+      console.log("Has any numbers:", hasAnyNumbers);
+
+      if (hasWeightData) {
+        // If we have weight data and either:
+        // 1. We have both start and end markers, OR
+        // 2. We have substantial data (indicating a complete reading)
+        const hasStartEnd =
+          buffer.includes(startBytes) && buffer.includes(endBytes);
+        const hasSubstantialData = buffer.length > 5; // Reduced threshold for testing
+        console.log("Has start/end markers:", hasStartEnd);
+        console.log("Has substantial data:", hasSubstantialData);
+
+        if (hasStartEnd || hasSubstantialData) {
+          console.log("Weight data detected, processing...");
           clearTimeout(timeout);
           this.subscription?.remove();
-          callback(finalData, BluetoothResponseType.SUCCESS);
+          callback(buffer, BluetoothResponseType.SUCCESS);
         }
+      } else if (hasAnyNumbers && buffer.length > 3) {
+        // If we have any numbers and some data, let's try to process it
+        console.log("Found numeric data, attempting to process...");
+        clearTimeout(timeout);
+        this.subscription?.remove();
+        callback(buffer, BluetoothResponseType.SUCCESS);
       }
+
+      console.log("=== END DATA PROCESSING ===");
     });
   }
 

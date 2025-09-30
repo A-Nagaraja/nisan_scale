@@ -26,9 +26,19 @@ const WeighingScaleScreen = () => {
   const [weight, setWeight] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [liveMessage, setLiveMessage] = useState("");
+  const [isContinuousMode, setIsContinuousMode] = useState(false);
+  const [continuousInterval, setContinuousInterval] =
+    useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     initializeBluetooth();
+
+    // Cleanup function to stop continuous monitoring when component unmounts
+    return () => {
+      if (continuousInterval) {
+        clearInterval(continuousInterval);
+      }
+    };
   }, []);
 
   const initializeBluetooth = async () => {
@@ -94,6 +104,13 @@ const WeighingScaleScreen = () => {
 
   const disconnect = async () => {
     try {
+      // Stop continuous monitoring if active
+      if (continuousInterval) {
+        clearInterval(continuousInterval);
+        setContinuousInterval(null);
+        setIsContinuousMode(false);
+      }
+
       await BluetoothService.disconnect((success) => {
         setIsConnected(false);
         setSelectedDevice(null);
@@ -120,28 +137,44 @@ const WeighingScaleScreen = () => {
         BluetoothService
       );
 
+      console.log("Service wrapper:", serviceWrapper);
+
       serviceWrapper.getWeightIfConnected(
         (weight, responseType, errorMessage) => {
+          console.log("Weight callback received:", {
+            weight,
+            responseType,
+            errorMessage,
+          });
           setIsLoading(false);
           setLiveMessage("");
           if (responseType === "SUCCESS") {
             setWeight(weight);
-            Alert.alert("Weight Reading", `Weight: ${weight} grams`);
+            if (!isContinuousMode) {
+              Alert.alert("Weight Reading", `Weight: ${weight} grams`);
+            }
           } else if (responseType === "TIME_OUT") {
-            Alert.alert(
-              "Timeout",
-              "Weight reading timed out. Please try again."
-            );
+            if (!isContinuousMode) {
+              Alert.alert(
+                "Timeout",
+                "Weight reading timed out. Please try again."
+              );
+            }
           } else if (responseType === "NO_DATA") {
-            Alert.alert(
-              "No Data",
-              "No weight data received. Please ensure the scale is ready and try again."
-            );
+            if (!isContinuousMode) {
+              Alert.alert(
+                "No Data",
+                "No weight data received. Please ensure the scale is ready and try again."
+              );
+            }
           } else {
-            Alert.alert("Error", errorMessage || "Failed to read weight");
+            if (!isContinuousMode) {
+              Alert.alert("Error", errorMessage || "Failed to read weight");
+            }
           }
         },
         (message) => {
+          console.log("Live message received:", message);
           setLiveMessage(message);
         }
       );
@@ -149,7 +182,82 @@ const WeighingScaleScreen = () => {
       setIsLoading(false);
       setLiveMessage("");
       console.error("Get weight error:", error);
-      Alert.alert("Error", "Failed to read weight");
+      if (!isContinuousMode) {
+        Alert.alert("Error", "Failed to read weight");
+      }
+    }
+  };
+
+  const testDifferentCommands = async () => {
+    if (!isConnected) {
+      Alert.alert("Not Connected", "Please connect to a device first");
+      return;
+    }
+
+    const testCommands = ["#E*", "E", "#E", "WEIGHT", "W", "R", "READ"];
+
+    for (const command of testCommands) {
+      console.log(`Testing command: ${command}`);
+      setLiveMessage(`Testing command: ${command}`);
+
+      try {
+        await BluetoothService.sendDataAndForget(
+          command,
+          (message, responseType) => {
+            console.log(`Command ${command} result:`, responseType);
+          }
+        );
+
+        // Wait a bit and listen for any response
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        // Try to listen for data
+        await BluetoothService.listenForData(
+          "",
+          "",
+          (message) => {
+            console.log(`Response to ${command}:`, message);
+            setLiveMessage(`Response to ${command}: ${message}`);
+          },
+          (message, responseType) => {
+            console.log(`Final response to ${command}:`, message, responseType);
+          }
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      } catch (error) {
+        console.log(`Error testing command ${command}:`, error);
+      }
+    }
+
+    setLiveMessage("Command testing completed");
+  };
+
+  const toggleContinuousMode = () => {
+    if (isContinuousMode) {
+      // Stop continuous monitoring
+      if (continuousInterval) {
+        clearInterval(continuousInterval);
+        setContinuousInterval(null);
+      }
+      setIsContinuousMode(false);
+      setLiveMessage("");
+    } else {
+      // Start continuous monitoring
+      setIsContinuousMode(true);
+      setLiveMessage("Starting continuous monitoring...");
+
+      // Get weight immediately
+      getWeight();
+
+      // Then set up interval for continuous readings
+      const interval = setInterval(() => {
+        if (isConnected && !isLoading) {
+          getWeight();
+        }
+      }, 2000); // Read every 2 seconds
+
+      setContinuousInterval(interval);
     }
   };
 
@@ -229,7 +337,7 @@ const WeighingScaleScreen = () => {
         <TouchableOpacity
           style={[styles.button, styles.getWeightButton]}
           onPress={getWeight}
-          disabled={!isConnected || isLoading}
+          disabled={!isConnected || isLoading || isContinuousMode}
         >
           {isLoading ? (
             <ActivityIndicator color="white" />
@@ -237,6 +345,29 @@ const WeighingScaleScreen = () => {
             <Text style={styles.buttonText}>Get Weight</Text>
           )}
         </TouchableOpacity>
+
+        {/* <TouchableOpacity
+          style={[styles.button, styles.testButton]}
+          onPress={testDifferentCommands}
+          disabled={!isConnected || isLoading}
+        >
+          <Text style={styles.buttonText}>Test Commands</Text>
+        </TouchableOpacity> */}
+
+        {/* <TouchableOpacity
+          style={[
+            styles.button,
+            isContinuousMode
+              ? styles.stopContinuousButton
+              : styles.continuousButton,
+          ]}
+          onPress={toggleContinuousMode}
+          disabled={!isConnected || isLoading}
+        >
+          <Text style={styles.buttonText}>
+            {isContinuousMode ? "Stop Monitoring" : "Continuous Mode"}
+          </Text>
+        </TouchableOpacity> */}
 
         {isConnected && (
           <TouchableOpacity
@@ -340,15 +471,26 @@ const styles = StyleSheet.create({
   buttonContainer: {
     flexDirection: "row",
     justifyContent: "space-around",
+    flexWrap: "wrap",
   },
   button: {
     padding: 15,
     borderRadius: 8,
     minWidth: 120,
     alignItems: "center",
+    margin: 5,
   },
   getWeightButton: {
     backgroundColor: "#28a745",
+  },
+  testButton: {
+    backgroundColor: "#6f42c1",
+  },
+  continuousButton: {
+    backgroundColor: "#17a2b8",
+  },
+  stopContinuousButton: {
+    backgroundColor: "#ffc107",
   },
   disconnectButton: {
     backgroundColor: "#dc3545",
