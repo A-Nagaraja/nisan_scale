@@ -29,6 +29,7 @@ const WeighingScaleScreen = () => {
   const [isContinuousMode, setIsContinuousMode] = useState(false);
   const [continuousInterval, setContinuousInterval] =
     useState<NodeJS.Timeout | null>(null);
+  const [isMonitoring, setIsMonitoring] = useState(false);
 
   useEffect(() => {
     initializeBluetooth();
@@ -109,6 +110,12 @@ const WeighingScaleScreen = () => {
         clearInterval(continuousInterval);
         setContinuousInterval(null);
         setIsContinuousMode(false);
+      }
+
+      // Stop continuous data monitoring if active
+      if (isMonitoring) {
+        BluetoothService.stopContinuousMonitoring();
+        setIsMonitoring(false);
       }
 
       await BluetoothService.disconnect((success) => {
@@ -194,43 +201,172 @@ const WeighingScaleScreen = () => {
       return;
     }
 
-    const testCommands = ["#E*", "E", "#E", "WEIGHT", "W", "R", "READ"];
+    // Expanded list of commands that weighing machines commonly use
+    const testCommands = [
+      "#E*", // Original command
+      "E", // Simple E
+      "#E", // E without *
+      "WEIGHT", // Full word
+      "W", // Single letter
+      "R", // Read
+      "READ", // Full read
+      "S", // Status
+      "STATUS", // Full status
+      "D", // Data
+      "DATA", // Full data
+      "M", // Measure
+      "MEASURE", // Full measure
+      "T", // Tare
+      "TARE", // Full tare
+      "Z", // Zero
+      "ZERO", // Full zero
+      "P", // Print
+      "PRINT", // Full print
+      "?", // Query
+      "!", // Exclamation
+      "\r", // Carriage return
+      "\n", // New line
+      "\r\n", // CRLF
+      "AT", // AT command
+      "AT+", // AT+ command
+      "OK", // OK command
+      "START", // Start command
+      "STOP", // Stop command
+      "RESET", // Reset command
+    ];
 
-    for (const command of testCommands) {
-      console.log(`Testing command: ${command}`);
-      setLiveMessage(`Testing command: ${command}`);
+    console.log("=== STARTING COMMAND TESTING ===");
+    setLiveMessage("Testing commands...");
+
+    for (let i = 0; i < testCommands.length; i++) {
+      const command = testCommands[i];
+      console.log(
+        `\n=== TESTING COMMAND ${i + 1}/${testCommands.length}: ${command} ===`
+      );
+      setLiveMessage(
+        `Testing command ${i + 1}/${testCommands.length}: ${command}`
+      );
 
       try {
+        // Send the command
         await BluetoothService.sendDataAndForget(
           command,
           (message, responseType) => {
-            console.log(`Command ${command} result:`, responseType);
+            console.log(`Command ${command} send result:`, responseType);
           }
         );
 
-        // Wait a bit and listen for any response
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        // Wait a bit for the command to be processed
+        await new Promise((resolve) => setTimeout(resolve, 500));
 
-        // Try to listen for data
-        await BluetoothService.listenForData(
+        // Listen for any response with a shorter timeout
+        let responseReceived = false;
+        await BluetoothService.listenForDataWithTimeout(
           "",
           "",
           (message) => {
-            console.log(`Response to ${command}:`, message);
+            console.log(`LIVE RESPONSE to ${command}:`, message);
             setLiveMessage(`Response to ${command}: ${message}`);
+            responseReceived = true;
           },
           (message, responseType) => {
-            console.log(`Final response to ${command}:`, message, responseType);
-          }
+            console.log(`FINAL RESPONSE to ${command}:`, message, responseType);
+            if (responseType === "SUCCESS" && message) {
+              console.log(
+                `🎉 SUCCESS! Command ${command} received response: ${message}`
+              );
+              setLiveMessage(`SUCCESS! ${command} -> ${message}`);
+              // Don't continue testing if we found a working command
+              return;
+            }
+          },
+          3000 // 3 second timeout for command testing
         );
 
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        // Wait between commands
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       } catch (error) {
         console.log(`Error testing command ${command}:`, error);
       }
     }
 
+    console.log("=== COMMAND TESTING COMPLETED ===");
     setLiveMessage("Command testing completed");
+  };
+
+  const toggleContinuousMonitoring = async () => {
+    if (!isConnected) {
+      Alert.alert("Not Connected", "Please connect to a device first");
+      return;
+    }
+
+    if (isMonitoring) {
+      // Stop monitoring
+      BluetoothService.stopContinuousMonitoring();
+      setIsMonitoring(false);
+      setLiveMessage("Continuous monitoring stopped");
+    } else {
+      // Start monitoring
+      setIsMonitoring(true);
+      setLiveMessage(
+        "Starting continuous monitoring... Try placing items on the scale!"
+      );
+
+      await BluetoothService.startContinuousMonitoring((message) => {
+        console.log("Continuous monitoring received:", message);
+        setLiveMessage(`Data received: ${message}`);
+
+        // Try to parse the data as weight
+        const serviceWrapper = createBluetoothServiceWrapper(
+          machineType,
+          BluetoothService
+        );
+
+        serviceWrapper.parseWeightFromMessage(
+          message,
+          (weight, responseType, errorMessage) => {
+            if (responseType === "SUCCESS" && weight > 0) {
+              setWeight(weight);
+              setLiveMessage(`Weight detected: ${weight} grams`);
+            }
+          }
+        );
+      });
+    }
+  };
+
+  const testContinuousData = async () => {
+    if (!isConnected) {
+      Alert.alert("Not Connected", "Please connect to a device first");
+      return;
+    }
+
+    console.log("Testing continuous data from weighing machine...");
+    setLiveMessage("Testing continuous data...");
+
+    try {
+      await BluetoothService.testContinuousData(
+        (message) => {
+          console.log("Continuous data received:", message);
+          setLiveMessage(`Continuous data: ${message}`);
+        },
+        (message, responseType) => {
+          console.log("Continuous data test result:", message, responseType);
+          setLiveMessage(`Continuous test result: ${responseType}`);
+          if (responseType === "SUCCESS") {
+            Alert.alert("Continuous Data Found", `Data: ${message}`);
+          } else {
+            Alert.alert(
+              "No Continuous Data",
+              "The weighing machine doesn't send data automatically"
+            );
+          }
+        }
+      );
+    } catch (error) {
+      console.error("Continuous data test error:", error);
+      setLiveMessage("Continuous data test failed");
+    }
   };
 
   const toggleContinuousMode = () => {
@@ -346,13 +482,36 @@ const WeighingScaleScreen = () => {
           )}
         </TouchableOpacity>
 
-        {/* <TouchableOpacity
+        <TouchableOpacity
+          style={[
+            styles.button,
+            isMonitoring
+              ? styles.stopMonitoringButton
+              : styles.monitoringButton,
+          ]}
+          onPress={toggleContinuousMonitoring}
+          disabled={!isConnected || isLoading}
+        >
+          <Text style={styles.buttonText}>
+            {isMonitoring ? "Stop Monitoring" : "Start Monitoring"}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.button, styles.testButton]}
+          onPress={testContinuousData}
+          disabled={!isConnected || isLoading}
+        >
+          <Text style={styles.buttonText}>Test Continuous Data</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
           style={[styles.button, styles.testButton]}
           onPress={testDifferentCommands}
           disabled={!isConnected || isLoading}
         >
           <Text style={styles.buttonText}>Test Commands</Text>
-        </TouchableOpacity> */}
+        </TouchableOpacity>
 
         {/* <TouchableOpacity
           style={[
@@ -485,6 +644,12 @@ const styles = StyleSheet.create({
   },
   testButton: {
     backgroundColor: "#6f42c1",
+  },
+  monitoringButton: {
+    backgroundColor: "#28a745",
+  },
+  stopMonitoringButton: {
+    backgroundColor: "#dc3545",
   },
   continuousButton: {
     backgroundColor: "#17a2b8",

@@ -69,6 +69,11 @@ abstract class BluetoothBaseServiceWrapper {
   connected(): boolean {
     return this.bluetoothService.connected();
   }
+
+  // Public method to parse weight from any message
+  parseWeightFromMessage(message: string, callback: WeightCallback): void {
+    this.readWeightFromMessageString(message, callback);
+  }
 }
 
 // ESSAE Implementation
