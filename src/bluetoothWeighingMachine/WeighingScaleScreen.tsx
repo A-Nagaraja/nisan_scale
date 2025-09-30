@@ -482,7 +482,7 @@ const WeighingScaleScreen = () => {
           )}
         </TouchableOpacity>
 
-        <TouchableOpacity
+        {/* <TouchableOpacity
           style={[
             styles.button,
             isMonitoring
@@ -511,7 +511,7 @@ const WeighingScaleScreen = () => {
           disabled={!isConnected || isLoading}
         >
           <Text style={styles.buttonText}>Test Commands</Text>
-        </TouchableOpacity>
+        </TouchableOpacity> */}
 
         {/* <TouchableOpacity
           style={[
